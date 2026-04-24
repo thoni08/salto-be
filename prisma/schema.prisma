@@ -6,15 +6,9 @@
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
+  previewFeatures = ["prismaSchemaFolder"]
 }
 
 datasource db {
   provider = "postgresql"
-}
-
-model User {
-  id       Int     @id @default(autoincrement())
-  username String  @unique
-  password String  // Ini akan menyimpan password yang sudah di-hash
-  name     String?
 }
