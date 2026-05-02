@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.route.js';
 import userRoutes from './routes/user.route.js';
 import threadRoutes from './routes/thread.route.js';
 import commentRoutes from './routes/comment.route.js';
+import homeRoutes from './routes/home.route.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,6 +25,7 @@ app.use('/api', authRoutes);
 app.use('/api', userRoutes);
 app.use('/api/threads', threadRoutes);
 app.use('/api/comments', commentRoutes);
+app.use('/api/home', homeRoutes);
 
 app.use((req, res, next) => {
   res.status(404).json({ success: false, error: 'Route not found' });
