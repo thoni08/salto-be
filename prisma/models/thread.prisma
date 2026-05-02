@@ -1,0 +1,84 @@
+enum ThreadActionType {
+  SAVE
+  VIEW
+}
+
+model Thread {
+  id        Int               @id @default(autoincrement())
+  title     String            @db.VarChar(200)
+  content   String
+  authorId  String?
+  author    User?             @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime          @default(now())
+  updatedAt DateTime         @updatedAt
+  deletedAt DateTime?
+
+  comments  ThreadComment[]
+  tags      ThreadTag[]
+  actions   ThreadAction[]
+}
+
+model ThreadComment {
+  id           Int         @id @default(autoincrement())
+  threadId     Int
+  thread       Thread      @relation(fields: [threadId], references: [id])
+  content      String
+  isBestAnswer Boolean     @default(false)
+  authorId     String?
+  author       User?       @relation(fields: [authorId], references: [id])
+  parentId     Int?
+  parent       ThreadComment? @relation("CommentParent", fields: [parentId], references: [id])
+  children     ThreadComment[] @relation("CommentParent")
+  likes        CommentLike[]
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+}
+
+model ThreadAction {
+  id        Int              @id @default(autoincrement())
+  userId    String?
+  user      User?            @relation(fields: [userId], references: [id])
+  threadId  Int
+  thread    Thread           @relation(fields: [threadId], references: [id])
+  action    ThreadActionType
+
+  createdAt DateTime         @default(now())
+  updatedAt DateTime        @updatedAt
+  deletedAt DateTime?
+}
+
+model Tag {
+  id        Int         @id @default(autoincrement())
+  name      String      @db.VarChar(50)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  threadTags ThreadTag[]
+}
+
+model ThreadTag {
+  threadId Int
+  thread   Thread @relation(fields: [threadId], references: [id])
+  tagId    Int
+  tag      Tag    @relation(fields: [tagId], references: [id])
+
+  @@id([threadId, tagId])
+}
+
+model CommentLike {
+  id        Int         @id @default(autoincrement())
+  userId    String?
+  user      User?       @relation(fields: [userId], references: [id])
+  commentId Int
+  comment   ThreadComment @relation(fields: [commentId], references: [id])
+
+  createdAt DateTime    @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  @@unique([userId, commentId])
+}

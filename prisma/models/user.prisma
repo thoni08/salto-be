@@ -25,6 +25,10 @@ model User {
 
   followers Follows[] @relation("following")
   following Follows[] @relation("follower")
+  threads   Thread[]
+  comments  ThreadComment[]
+  actions   ThreadAction[]
+  likes     CommentLike[]
 
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
