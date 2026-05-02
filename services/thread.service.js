@@ -165,7 +165,19 @@ export const getThreads = async (query) => {
     const threads = await prisma.thread.findMany({
       where: { id: { in: orderedThreadIds } },
       include: {
-        author: true,
+        author: {
+          select: {
+            id: true,
+            Avatar: true,
+            userName: true,
+            fullName: true,
+            email: true,
+            role: true,
+            field: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
         tags: { include: { tag: true } },
       },
     });
@@ -201,7 +213,19 @@ export const getThreads = async (query) => {
       where,
       orderBy,
       include: {
-        author: true,
+        author: {
+          select: {
+            id: true,
+            Avatar: true,
+            userName: true,
+            fullName: true,
+            email: true,
+            role: true,
+            field: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
         tags: { include: { tag: true } },
       },
     }),
@@ -223,7 +247,19 @@ export const getThreadById = async (id, userId) => {
   return await prisma.thread.findUnique({
     where: { id: Number(id) },
     include: {
-      author: true,
+      author: {
+        select: {
+          id: true,
+          Avatar: true,
+          userName: true,
+          fullName: true,
+          email: true,
+          role: true,
+          field: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
       tags: { include: { tag: true } },
     }
   });
@@ -348,7 +384,21 @@ export const getThreadComments = async (id, query, userId) => {
 
     const comments = await prisma.threadComment.findMany({
       where: { id: { in: pagedIds } },
-      include: { author: true },
+      include: {
+        author: {
+          select: {
+            id: true,
+            Avatar: true,
+            userName: true,
+            fullName: true,
+            email: true,
+            role: true,
+            field: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
     });
 
     const commentMap = new Map(comments.map((comment) => [comment.id, comment]));
@@ -370,7 +420,21 @@ export const getThreadComments = async (id, query, userId) => {
       skip,
       take: parsedLimit,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      include: { author: true }
+      include: {
+        author: {
+          select: {
+            id: true,
+            Avatar: true,
+            userName: true,
+            fullName: true,
+            email: true,
+            role: true,
+            field: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      }
     }),
     prisma.threadComment.count({ where: baseWhere })
   ]);
@@ -494,7 +558,19 @@ export const getRelatedThreads = async (id) => {
   const threads = await prisma.thread.findMany({
     where: { id: { in: sortedIds } },
     include: {
-      author: true,
+      author: {
+        select: {
+          id: true,
+          Avatar: true,
+          userName: true,
+          fullName: true,
+          email: true,
+          role: true,
+          field: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
       tags: { include: { tag: true } },
     },
   });
