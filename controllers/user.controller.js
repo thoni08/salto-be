@@ -7,6 +7,7 @@ import {
   followUserService,
   unfollowUserService,
   isFollowingService,
+  getTopAlumniService,
   parseUserId,
   parseBooleanQuery,
   ROLE_VALUES,
@@ -155,6 +156,20 @@ export const IsFollowing = async (req, res) => {
   }
   return res.status(result.status || 200).json({
     message: 'Status follow berhasil diambil',
+    data: result.data,
+  });
+};
+
+export const GetTopAlumni = async (req, res) => {
+  const result = await getTopAlumniService(req.query?.timeframe);
+  if (result.error) {
+    return res.status(result.status || 500).json({ message: result.error });
+  }
+
+  return res.status(result.status || 200).json({
+    message: 'Data top alumni berhasil diambil',
+    timeframe: result.timeframe,
+    startDate: result.startDate?.toISOString(),
     data: result.data,
   });
 };
