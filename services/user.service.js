@@ -29,6 +29,36 @@ const parseBooleanQuery = (value) => {
   return null;
 };
 
+const TOP_ALUMNI_TIMEFRAMES = new Set(['day', 'week', 'month', 'year']);
+
+const resolveTopAlumniTimeframe = (timeframe) => {
+  const normalized = String(timeframe ?? 'month').trim().toLowerCase();
+  if (!TOP_ALUMNI_TIMEFRAMES.has(normalized)) {
+    return { error: 'Parameter timeframe harus day, week, month, atau year.' };
+  }
+
+  const now = new Date();
+  const start = new Date(now);
+  switch (normalized) {
+    case 'day':
+      start.setDate(now.getDate() - 1);
+      break;
+    case 'week':
+      start.setDate(now.getDate() - 7);
+      break;
+    case 'month':
+      start.setMonth(now.getMonth() - 1);
+      break;
+    case 'year':
+      start.setFullYear(now.getFullYear() - 1);
+      break;
+    default:
+      break;
+  }
+
+  return { normalized, start };
+};
+
 export async function getUserWithRelations(client, userId) {
   const userResult = await client.query(
     `SELECT id, "Avatar", "userName", "fullName", email, role, field, "createdAt", "updatedAt", "deletedAt"
@@ -301,6 +331,86 @@ export async function getUsersService(query) {
     }
   } catch (error) {
     return { status: 500, error: error.message };
+  }
+}
+
+export async function getTopAlumniService(timeframe) {
+  const resolved = resolveTopAlumniTimeframe(timeframe);
+  if (resolved.error) {
+    return { status: 400, error: resolved.error };
+  }
+
+  const { normalized, start } = resolved;
+  const client = await pool.connect();
+  try {
+    const query = `
+      WITH points AS (
+        SELECT "authorId" AS "userId", COUNT(*)::int * 1 AS points
+        FROM "ThreadComment"
+        WHERE "deletedAt" IS NULL
+          AND "parentId" IS NOT NULL
+          AND "createdAt" >= $1
+        GROUP BY "authorId"
+        UNION ALL
+        SELECT "authorId" AS "userId", COUNT(*)::int * 2 AS points
+        FROM "ThreadComment"
+        WHERE "deletedAt" IS NULL
+          AND "parentId" IS NULL
+          AND "createdAt" >= $1
+        GROUP BY "authorId"
+        UNION ALL
+        SELECT "authorId" AS "userId", COUNT(*)::int * 5 AS points
+        FROM "ThreadComment"
+        WHERE "deletedAt" IS NULL
+          AND "isBestAnswer" = true
+          AND "updatedAt" >= $1
+        GROUP BY "authorId"
+      ),
+      agg AS (
+        SELECT "userId", SUM(points)::int AS points
+        FROM points
+        WHERE "userId" IS NOT NULL
+        GROUP BY "userId"
+      )
+      SELECT
+        u.id,
+        u."Avatar",
+        u."userName",
+        u."fullName",
+        u.role,
+        u.field,
+        u."createdAt",
+        agg.points
+      FROM agg
+      JOIN "User" u ON u.id = agg."userId"
+      WHERE u."deletedAt" IS NULL
+        AND u.role IN ('Alumni', 'AlumniMentor')
+      ORDER BY agg.points DESC, u."fullName" ASC, u.id ASC
+      LIMIT 10
+    `;
+
+    const result = await client.query(query, [start]);
+    const alumni = result.rows.map((row) => ({
+      id: row.id,
+      avatar: row.Avatar,
+      userName: row.userName,
+      fullName: row.fullName,
+      role: row.role,
+      field: row.field,
+      createdAt: row.createdAt,
+      points: row.points,
+    }));
+
+    return {
+      status: 200,
+      data: alumni,
+      timeframe: normalized,
+      startDate: start,
+    };
+  } catch (error) {
+    return { status: 500, error: error.message };
+  } finally {
+    client.release();
   }
 }
 
