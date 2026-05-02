@@ -387,6 +387,18 @@ export const getThreadComments = async (id, query, userId) => {
 };
 
 export const createThreadComment = async (id, userId, data) => {
+  // If this is a top-level comment (answer to thread), only alumni can do it
+  if (!data.parentId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true }
+    });
+    
+    if (!user || user.role === AUTHOR_TYPE_VALUES.student) {
+      throw createHttpError(403, 'Only alumni can answer threads. Other users can reply to comments.');
+    }
+  }
+  
   return await prisma.threadComment.create({
     data: {
       ...data,
