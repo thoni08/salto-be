@@ -9,12 +9,14 @@ import {
   FollowUser,
   UnfollowUser,
   IsFollowing,
+  GetTopAlumni,
 } from '../controllers/user.controller.js';
 
 const router = express.Router();
 
 // General user routes
 router.get('/users', verifyToken, GetUsers);
+router.get('/users/top-alumni', verifyToken, GetTopAlumni);
 router.get('/user', verifyToken, GetUser);
 
 // Follow routes
