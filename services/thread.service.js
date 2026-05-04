@@ -183,6 +183,34 @@ export const getThreads = async (query) => {
     });
     const threadMap = new Map(threads.map((thread) => [thread.id, thread]));
 
+    // Attach stats: views (from ThreadAction with action='VIEW') and
+    // answers (top-level comments: parentId == null)
+    const viewCounts = await prisma.threadAction.groupBy({
+      by: ['threadId'],
+      where: { threadId: { in: orderedThreadIds }, action: 'VIEW' },
+      _count: { _all: true },
+    });
+
+    const answerCounts = await prisma.threadComment.groupBy({
+      by: ['threadId'],
+      where: { threadId: { in: orderedThreadIds }, parentId: null, deletedAt: null },
+      _count: { _all: true },
+    });
+
+    const viewMap = new Map(viewCounts.map((r) => [r.threadId, r._count._all]));
+    const answerMap = new Map(answerCounts.map((r) => [r.threadId, r._count._all]));
+
+    const data = orderedThreadIds
+      .map((id) => threadMap.get(id))
+      .filter(Boolean)
+      .map((thread) => ({
+        ...thread,
+        stats: {
+          views: viewMap.get(thread.id) ?? 0,
+          answers: answerMap.get(thread.id) ?? 0,
+        },
+      }));
+
     return {
       meta: {
         currentPage: parsedPage,
@@ -190,7 +218,7 @@ export const getThreads = async (query) => {
         totalItems,
         totalPages: Math.ceil(totalItems / parsedLimit),
       },
-      data: orderedThreadIds.map((id) => threadMap.get(id)).filter(Boolean),
+      data,
     };
   }
 
@@ -232,6 +260,43 @@ export const getThreads = async (query) => {
     prisma.thread.count({ where })
   ]);
 
+  // Attach stats (views and answers) to each thread in `items`.
+  const ids = items.map((t) => t.id);
+  if (ids.length === 0) {
+    return {
+      meta: {
+        currentPage: parsedPage,
+        limit: parsedLimit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / parsedLimit)
+      },
+      data: []
+    };
+  }
+
+  const viewCounts = await prisma.threadAction.groupBy({
+    by: ['threadId'],
+    where: { threadId: { in: ids }, action: 'VIEW' },
+    _count: { _all: true },
+  });
+
+  const answerCounts = await prisma.threadComment.groupBy({
+    by: ['threadId'],
+    where: { threadId: { in: ids }, parentId: null, deletedAt: null },
+    _count: { _all: true },
+  });
+
+  const viewMap = new Map(viewCounts.map((r) => [r.threadId, r._count._all]));
+  const answerMap = new Map(answerCounts.map((r) => [r.threadId, r._count._all]));
+
+  const data = items.map((thread) => ({
+    ...thread,
+    stats: {
+      views: viewMap.get(thread.id) ?? 0,
+      answers: answerMap.get(thread.id) ?? 0,
+    },
+  }));
+
   return {
     meta: {
       currentPage: parsedPage,
@@ -239,30 +304,96 @@ export const getThreads = async (query) => {
       totalItems,
       totalPages: Math.ceil(totalItems / parsedLimit)
     },
-    data: items
+    data
   };
 };
 
 export const getThreadById = async (id, userId) => {
-  return await prisma.thread.findUnique({
-    where: { id: Number(id) },
-    include: {
-      author: {
-        select: {
-          id: true,
-          Avatar: true,
-          userName: true,
-          fullName: true,
-          email: true,
-          role: true,
-          field: true,
-          createdAt: true,
-          updatedAt: true,
+  const threadId = Number(id);
+
+  const [thread, totalViews, totalSaves, totalUpvotes, totalAnswers, alumniResponded] = await Promise.all([
+    prisma.thread.findUnique({
+      where: { id: threadId },
+      include: {
+        author: {
+          select: {
+            id: true,
+            Avatar: true,
+            userName: true,
+            fullName: true,
+            email: true,
+            role: true,
+            field: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+        tags: { include: { tag: true } },
+      }
+    }),
+    prisma.threadAction.count({
+      where: { threadId, action: 'VIEW', deletedAt: null },
+    }),
+    prisma.threadAction.count({
+      where: { threadId, action: 'SAVE', deletedAt: null },
+    }),
+    prisma.commentLike.count({
+      where: {
+        deletedAt: null,
+        comment: {
+          threadId,
+          deletedAt: null,
         },
       },
-      tags: { include: { tag: true } },
-    }
-  });
+    }),
+    prisma.threadComment.count({
+      where: {
+        threadId,
+        parentId: null,
+        deletedAt: null,
+      },
+    }),
+    prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        role: { in: ['Alumni', 'AlumniMentor'] },
+        comments: {
+          some: {
+            threadId,
+            parentId: null,
+            deletedAt: null,
+          },
+        },
+      },
+      select: {
+        id: true,
+        Avatar: true,
+        userName: true,
+        fullName: true,
+        email: true,
+        role: true,
+        field: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: [{ fullName: 'asc' }, { id: 'asc' }],
+    }),
+  ]);
+
+  if (!thread) return null;
+
+  return {
+    ...thread,
+    stats: {
+      totalViews,
+      totalSaves,
+      totalUpvotes,
+      totalAnswers,
+    },
+    participantSummary: {
+      alumniResponded,
+    },
+  };
 };
 
 export const createThread = async (userId, data) => {
@@ -321,12 +452,89 @@ export const getThreadComments = async (id, query, userId) => {
     throw createHttpError(400, 'Parameter limit tidak valid. Gunakan 1-100.');
   }
 
+  const threadId = Number(id);
   const skip = (parsedPage - 1) * parsedLimit;
-  const baseWhere = { threadId: Number(id), deletedAt: null };
+  const parentWhere = { threadId, deletedAt: null, parentId: null };
+
+  const enrichParentComments = async (parents) => {
+    if (parents.length === 0) return [];
+
+    const parentIds = parents.map((comment) => comment.id);
+    const replies = await prisma.threadComment.findMany({
+      where: {
+        threadId,
+        deletedAt: null,
+        parentId: { in: parentIds },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: {
+        author: {
+          select: {
+            id: true,
+            Avatar: true,
+            userName: true,
+            fullName: true,
+            email: true,
+            role: true,
+            field: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    const allCommentIds = [...parentIds, ...replies.map((reply) => reply.id)];
+    const [likeCounts, currentUserLikes] = await Promise.all([
+      prisma.commentLike.groupBy({
+        by: ['commentId'],
+        where: {
+          commentId: { in: allCommentIds },
+          deletedAt: null,
+        },
+        _count: { _all: true },
+      }),
+      userId
+        ? prisma.commentLike.findMany({
+            where: {
+              userId,
+              commentId: { in: allCommentIds },
+              deletedAt: null,
+            },
+            select: { commentId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const likeMap = new Map(likeCounts.map((row) => [row.commentId, row._count._all]));
+    const currentUserLikedSet = new Set(currentUserLikes.map((row) => row.commentId));
+    const repliesByParent = new Map();
+
+    replies.forEach((reply) => {
+      const bucket = repliesByParent.get(reply.parentId) ?? [];
+      bucket.push({
+        ...reply,
+        stats: {
+          likes: likeMap.get(reply.id) ?? 0,
+        },
+        currentUserLiked: currentUserLikedSet.has(reply.id),
+      });
+      repliesByParent.set(reply.parentId, bucket);
+    });
+
+    return parents.map((parent) => ({
+      ...parent,
+      stats: {
+        likes: likeMap.get(parent.id) ?? 0,
+      },
+      currentUserLiked: currentUserLikedSet.has(parent.id),
+      replies: repliesByParent.get(parent.id) ?? [],
+    }));
+  };
 
   if (normalizedSortBy === 'popular') {
     const commentMeta = await prisma.threadComment.findMany({
-      where: baseWhere,
+      where: parentWhere,
       select: { id: true, createdAt: true },
     });
 
@@ -345,7 +553,8 @@ export const getThreadComments = async (id, query, userId) => {
     const likeCounts = await prisma.commentLike.groupBy({
       by: ['commentId'],
       where: {
-        comment: { threadId: Number(id), deletedAt: null },
+        deletedAt: null,
+        comment: { threadId, deletedAt: null, parentId: null },
       },
       _count: { _all: true },
     });
@@ -402,6 +611,8 @@ export const getThreadComments = async (id, query, userId) => {
     });
 
     const commentMap = new Map(comments.map((comment) => [comment.id, comment]));
+    const orderedParents = pagedIds.map((commentId) => commentMap.get(commentId)).filter(Boolean);
+    const data = await enrichParentComments(orderedParents);
 
     return {
       meta: {
@@ -410,13 +621,13 @@ export const getThreadComments = async (id, query, userId) => {
         totalItems,
         totalPages: Math.ceil(totalItems / parsedLimit),
       },
-      data: pagedIds.map((commentId) => commentMap.get(commentId)).filter(Boolean),
+      data,
     };
   }
 
   const [items, totalItems] = await Promise.all([
     prisma.threadComment.findMany({
-      where: baseWhere,
+      where: parentWhere,
       skip,
       take: parsedLimit,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
@@ -436,8 +647,10 @@ export const getThreadComments = async (id, query, userId) => {
         },
       }
     }),
-    prisma.threadComment.count({ where: baseWhere })
+    prisma.threadComment.count({ where: parentWhere })
   ]);
+
+  const data = await enrichParentComments(items);
 
   return {
     meta: {
@@ -446,7 +659,7 @@ export const getThreadComments = async (id, query, userId) => {
       totalItems,
       totalPages: Math.ceil(totalItems / parsedLimit)
     },
-    data: items
+    data
   };
 };
 
